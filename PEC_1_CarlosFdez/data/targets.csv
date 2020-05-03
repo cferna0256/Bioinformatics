@@ -1,0 +1,25 @@
+Samples;Age;Genotype;Title;Group;ShortName
+GSM227448;2 d;KO;Nrl ko P2 replicate 1;KO.P2;KO.P2.1
+GSM227449;2 d;KO;Nrl ko P2 replicate 2;KO.P2;KO.P2.2
+GSM227450;2 d;KO;Nrl ko P2 replicate 3;KO.P2;KO.P2.3
+GSM227451;2 d;KO;Nrl ko P2 replicate 4;KO.P2;KO.P2.4
+GSM227452;2 d;WT;WT P2 replicate 1;WT.P2;WT.P2.1
+GSM227453;2 d;WT;WT P2 replicate 2;WT.P2;WT.P2.2
+GSM227454;2 d;WT;WT P2 replicate 3;WT.P2;WT.P2.3
+GSM227455;2 d;WT;WT P2 replicate 4;WT.P2;WT.P2.4
+GSM227456;10 d;KO;Nrl ko P10 replicate 1;KO.P10;KO.P10.1
+GSM227457;10 d;KO;Nrl ko P10 replicate 2;KO.P10;KO.P10.2
+GSM227458;10 d;KO;Nrl ko P10 replicate 3;KO.P10;KO.P10.3
+GSM227459;10 d;KO;Nrl ko P10 replicate 4;KO.P10;KO.P10.4
+GSM227460;10 d;WT;WT P10 replicate 1;WT.P10;WT.P10.1
+GSM227461;10 d;WT;WT P10 replicate 2;WT.P10;WT.P10.2
+GSM227462;10 d;WT;WT P10 replicate 3;WT.P10;WT.P10.3
+GSM227463;10 d;WT;WT P10 replicate 4;WT.P10;WT.P10.4
+GSM227464;2 mo;KO;Nrl ko 2 mon replicate 1;KO.2;KO.2.1
+GSM227465;2 mo;KO;Nrl ko 2 mon replicate 2;KO.2;KO.2.2
+GSM227466;2 mo;KO;Nrl ko 2 mon replicate 3;KO.2;KO.2.3
+GSM227467;2 mo;KO;Nrl ko 2 mon replicate 4;KO.2;KO.2.4
+GSM227468;2 mo;WT;WT 2 mon replicate 1;WT.2;WT.2.1
+GSM227469;2 mo;WT;WT 2 mon replicate 2;WT.2;WT.2.2
+GSM227470;2 mo;WT;WT 2 mon replicate 3;WT.2;WT.2.3
+GSM227471;2 mo;WT;WT 2 mon replicate 4;WT.2;WT.2.4

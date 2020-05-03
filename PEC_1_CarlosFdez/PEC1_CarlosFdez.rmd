@@ -1,0 +1,671 @@
+---
+title: "ANÁLISIS DE DATOS ÓMICOS, PEC 1"
+author: "Carlos Fernandez Medina"
+date: "2 de mayo de 2020"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: paper
+    font-family: Courier New, Courier, monospace;
+    div style="text-align: justify"
+---
+
+# Abstract
+
+La proteína cremallera de leucina específica de la retina neural de los bastones (Nrl) es fundamental para la diferenciación de estos fotorreceptores. En esta investigación se pretende estudiar la diferencia de expresión génica entre ratones silvestres (WT) y deficientes de la proteína (KO) en tres puntos de su ciclo de vida. Esto permitirá identificar posibles genes implicados en enfermedades relacionadas con la ausencia de bastones.
+ 
+# Objetivos
+
+En este estudio se pretende describir la diferencia de expresión génica entre ratones con Nrl (WT) y sin Nrl (Nrl KO) en tres etapas de la vida, concretamente a los dos días de vida (P2), a los diez días de vida (P10) y a los dos meses de vida (2). Además, se pretende conocer los genes que pudieran estar relacionados con enfermedades relacionadas con la ausencia de bastones.
+
+# Materiales, métodos y resultados
+
+## Datos
+
+Los datos se obtuvieron del análisis de expresión de RNA de retinas de ratones sin bastones Nrl knock-out (KO) y de ratones silvestres (WT) y se llevó a cabo mediante microarrays de Affymetrix MICROARRAY SUITE v5.0. Los datos obtenidos se pueden consultar en la base de datos "*Gene Expression Omnibus*" (GEO), serie GSE8972.
+
+```{r}
+setwd("C:/Users/Carlos/Documents/MÁSTER BIOINFORMÁTICA - UOC/Análisis de Datos Ómicos/PEC_1_CarlosFdez/")
+```
+
+```{r ReadCELfiles, message=FALSE, results='hide', warning=FALSE}
+require(oligo)
+celfiles <- list.celfiles("./data", full.names=TRUE) #importamos ficheros
+require (Biobase)
+my.targets <-read.AnnotatedDataFrame(file.path("./data","targets.csv"),
+                                  header = TRUE, row.names = 1, sep=";")
+rawData <- read.celfiles(celfiles, phenoData = my.targets)
+```
+
+```{r ChangeName}
+my.targets@data$ShortName->rownames(pData(rawData))
+colnames(rawData) <-rownames(pData(rawData)) 
+
+head(rawData)
+```
+
+## Procedimiento general de análisis (pasos, “workflow” o “pipeline”)
+
+1. [Identificar que grupos hay y a qué grupo pertenece cada muestra]
+2. [Control de calidad de los datos brutos]
+3. [Normalización]
+4. [Control de calidad de los datos normalizados]
+5. [Filtraje no específico]
+6. [Identificación de genes diferencialmente expresados]
+7. [Anotación de los resultados]
+8. [Comparación entre distintas comparaciones]
+9. [Análisis de significación biológica] 
+
+
+### Identificar que grupos hay y a qué grupo pertenece cada muestra
+
+En este estudio se diferencian seis grupos dependiendo de si presenta (WT) o no (KO) la proteína y de la fase de vida del ratón, dos días (P2), diez días (P10) o dos meses (2). 
+
+```{r}
+targets <- read.csv2("./data/targets.csv", header = TRUE, sep = ";")
+knitr::kable(
+  targets, booktabs = TRUE,
+  caption = 'Relación de ficheros usados para este análisis')
+```
+
+### Control de calidad de los datos brutos
+
+Para el control de calidad de los datos brutos se lleva a cabo un análisis mediante el método "Principal Component Analysis" (PCA) y mediante gráficos de cajas ("boxplots"). Además, se obtienen gráficos ejecutando la librería `arrayQualityMetrics`.
+
+```{r QCRaw, message=FALSE, warning=FALSE, eval=FALSE}
+library(arrayQualityMetrics)
+arrayQualityMetrics(rawData)
+```
+
+
+```{r}
+require(ggplot2)
+require(ggrepel)
+plotPCA <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
+  data <- prcomp(t(datos),scale=scale)
+  # plot adjustments
+  dataDf <- data.frame(data$x)
+  Group <- factor
+  loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+  # main plot
+  p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+    theme_classic() +
+    geom_hline(yintercept = 0, color = "gray70") +
+    geom_vline(xintercept = 0, color = "gray70") +
+    geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+    coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+    scale_fill_discrete(name = "Group")
+  # avoiding labels superposition
+  p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),segment.size = 0.25, size = size) + 
+    labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+    ggtitle(paste("Principal Component Analysis para: ",title,sep=" "))+ 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=colores)
+  }
+```
+
+
+```{r PCARaw, message=FALSE}
+plotPCA(exprs(rawData), labels = targets$ShortName, factor = targets$Group, 
+         title="Datos brutos", scale = FALSE, size = 2, 
+         colores = c("purple", "blue", "green", "red", "orange", "yellow"))
+```
+
+Podemos ver que el primer componente de los datos brutos presenta el 36.1% de la variabilidad de las muestras. Esta variabilidad está proporcionada por las muestras de P10 y 2. 
+
+Guardamos esta gráfica en nuestro directorio de trabajo.
+
+```{r savePCAraw, echo=TRUE, results='hide'}
+tiff("figuras/PCA_RawData.tiff", res = 200, width = 4.5, height = 4, units = 'in')
+plotPCA(exprs(rawData), labels = targets$ShortName, factor = targets$Group, 
+         title="Datos brutos", scale = FALSE, size = 2, 
+         colores = c("purple", "blue", "green", "red", "orange", "yellow"))
+dev.off()
+```
+
+
+```{r BoxplotRaw, message=FALSE}
+boxplot(rawData, cex.axis=0.5, las=2,  which="all", 
+         col = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+         main="Boxplot de intensidad de los arrays en datos brutos")
+```
+
+```{r saveIntensRaw, echo=FALSE, results='hide'}
+tiff("figuras/BoxPlot_Intensity_RawData.tiff", res = 200, width = 4, height = 4, units = 'in')
+boxplot(rawData, cex.axis=0.5, las=2,  which="all", 
+         col = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+         main="Boxplot de intensidad de los arrays en datos brutos")
+dev.off()
+```
+
+Con el primer gráfico de cajas podemos ver ligeras variaciones en los valores de intensidad, lo cual es normal en el análisis de datos crudos.
+
+### Normalización
+
+Aplicamos el método más utilizado para la normalización de los datos: "Robust Multichip Average" (RMA).
+
+```{r Normalization}
+esetRma <- rma(rawData)
+```
+
+### Control de calidad de los datos normalizados
+
+Primero, realizamos de nuevo un diagrama PCA para observar las variaciones tras la normalización de los datos:
+
+```{r QCNorm, message=FALSE, warning=FALSE, eval=FALSE}
+arrayQualityMetrics(esetRma, outdir = file.path("./results", "QCDir.Norm"), force=TRUE)
+```
+
+
+```{r PCANorm, message=FALSE, fig.cap="Visualization of first two principal components for normalized data"}
+plotPCA(exprs(esetRma), labels = targets$ShortName, factor = targets$Group, 
+         title="Datos normalizados", scale = FALSE, size = 2, 
+         colores = c("purple", "blue", "green", "red", "orange", "yellow"))
+```
+
+```{r savePCAnorm, echo=FALSE, warning=FALSE, results='hide'}
+tiff("figuras/PCA_NormData.tiff", res = 150, width = 5, height = 5, units = 'in')
+plotPCA(exprs(esetRma), labels = targets$ShortName, factor = targets$Group, 
+         title="Datos normalizados", scale = FALSE, size = 2, 
+         colores = c("purple", "blue", "green", "red", "orange", "yellow"))
+dev.off()
+```
+
+Podemos observar que el primer componente presenta el 63.9% de la variabilidad, valor que ha aumentado con respecto a los datos brutos. Esto Sigue debiéndose a las muestras de P10 y 2. Ahora se ven más agrupadas las muestras de los seis diferentes grupos.
+
+```{r BoxplotNorm, warning=FALSE, message=FALSE}
+boxplot(esetRma, cex.axis=0.5, las=2,  which="all", 
+         col = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+         main="Boxplot de intensidad de los arrays en datos normalizados")
+```
+
+Ahora los diagramas de caja son muy similares y apenas hay diferencias.
+
+```{r saveIntensNorm, echo=FALSE, warning=FALSE, results='hide'}
+tiff("figuras/Boxplot_Intensity_NormData.tiff", res = 150, width = 5, height = 5, units = 'in')
+boxplot(esetRma, cex.axis=0.5, las=2,  which="all", 
+         col = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+         main="Boxplot de intensidad de los arrays en datos normalizados")
+dev.off()
+```
+
+Por útlimo, llevamos a cabo un análisis de (PCVA), un tipo de los llamados "Batch Detection" con el fin de observar qué factores (efectos) están involucrados con la variabilidad de la expresión de los genes.
+
+```{r BatchDetection, message=FALSE, warning=FALSE}
+#load the library
+require(pvca)
+pData(esetRma) <- targets
+#select the threshold
+pct_threshold <- 0.6
+#select the factors to analyze
+batch.factors <- c("Genotype", "Age")
+#run the analysis
+pvcaObj <- pvcaBatchAssess (esetRma, batch.factors, pct_threshold)
+```
+
+
+```{r plotPVCA}
+bp <- barplot(pvcaObj$dat, xlab = "Efectos",
+  ylab = "Weighted average proportion variance",
+  ylim= c(0,1.1),col = c("blue"), las=2,
+  main="Estimación PVCA")
+axis(1, at = bp, labels = pvcaObj$label, cex.axis = 0.55, las=2)
+values = pvcaObj$dat
+new_values = round(values , 3)
+text(bp,pvcaObj$dat,labels = new_values, pos=3, cex = 0.5)
+```
+
+```{r savePVCAplot, echo=FALSE, results='hide'}
+tiff("figuras/PVCAplot.tiff", res = 150, width = 5, height = 5, units = 'in')
+bp <- barplot(pvcaObj$dat, xlab = "Efectos",
+  ylab = "Weighted average proportion variance",
+  ylim= c(0,1.1),col = c("blue"), las=2,
+  main="Estimación PVCA")
+axis(1, at = bp, labels = pvcaObj$label, cex.axis = 0.55, las=2)
+values = pvcaObj$dat
+new_values = round(values , 3)
+text(bp,pvcaObj$dat,labels = new_values, pos=3, cex = 0.5)
+dev.off()
+```
+
+En esta gráfica sobre la estimación PVCA podemos observar que el efecto "Age" (edad) es el principal responsable de la variación.
+
+### Filtraje no específico
+
+Primero, clasificamos los genes según su variabilidad:
+
+```{r SDplot}
+sds <- apply (exprs(esetRma), 1, sd)
+sdsO<- sort(sds)
+plot(1:length(sdsO), sdsO, main="Distribución de la variabilidad de los genes",
+     sub="Las líneas verticales representan los percentiles del 90 y 95%",
+     xlab="Índice de genes (de menos a más variable)", ylab="Desviación estándar")
+abline(v=length(sds)*c(0.9,0.95))
+```
+
+```{r saveSDplot, echo=FALSE, results='hide'}
+tiff("figuras/SDplot.tiff", res = 150, width = 5, height = 5, units = 'in')
+plot(1:length(sdsO), sdsO, main="Distribución de la variabilidad de los genes",
+     sub="Las líneas verticales representan los percentiles del 90 y 95%",
+     xlab="Índice de genes (de menos a más variable)", ylab="Desviación estándar")
+abline(v=length(sds)*c(0.9,0.95))
+dev.off()
+```
+
+Tras ello, filtramos los genes con menor variabilidad y los eliminamos:
+
+```{r Filtering1, results='hide', message=FALSE}
+require(genefilter)
+require(mogene21sttranscriptcluster.db)
+require(mgu74av2.db)
+annotation(esetRma) <- "mgu74av2.db"
+filtered <- nsFilter(esetRma, 
+                     require.entrez = TRUE, remove.dupEntrez = TRUE,
+                     var.filter=TRUE, var.func=IQR, var.cutoff=0.75, 
+                     filterByQuantile=TRUE, feature.exclude = "^AFFX")
+```
+
+
+```{r FilterResults1, results='hide', echo=FALSE}
+names(filtered)
+class(filtered$eset)
+```
+
+Eliminamos lo genes con menos variabilidad y que su variabilidad puede ser aleatoria.
+
+```{r FilterResults2}
+print(filtered$filter.log)
+esetFiltered <-filtered$eset
+```
+
+Guardamos los datos normalizados y filtrados:
+
+```{r SaveData1, results='hide', message=FALSE}
+write.csv(exprs(esetRma), file="./results/normalized.Data.csv")
+write.csv(exprs(esetFiltered), file="./results/normalized.Filtered.Data.csv")
+save(esetRma, esetFiltered, file="./results/normalized.Data.Rda")
+```
+
+### Identificación de genes diferencialmente expresados
+
+Primero, definiminos la matriz de diseño con los datos filtrados y normalizados:
+
+
+```{r LoadSavedData}
+if (!exists("esetFiltered")) load (file="./results/normalized.Data.Rda")
+```
+
+```{r DesignMatrix, message=FALSE}
+require(limma)
+designMat<- model.matrix(~0+Group, pData(esetFiltered))
+colnames(designMat) <- c("KO.2", "KO.P10", "KO.P2", "WT.2", "WT.P10", "WT.P2")
+print(designMat)
+```
+
+Tras ello, realizamos una matriz de contrastes para definir seis comparaciones, una entre KO y WT en P2 (`KOvsWT.P2`), otra entre  KO y WT en P10(`KOvsWT.P10`), otra entre  KO y WT en 2 (`KOvsWT.2`) y tres comparaciones entre los tres anteriores (`INT.1`, `INT.2` e `INT.3`):
+
+```{r setContrasts}
+cont.matrix <- makeContrasts (KOvsWT.2 = KO.2-WT.2,
+                              KOvsWT.P10 = KO.P10-WT.P10,
+                              KOvsWT.P2 = KO.P2-WT.P2,
+                              INT.1 = (KO.2-WT.2) - (KO.P10-WT.P10),
+                              INT.2 = (KO.P10-WT.P10) - (KO.P2-WT.P2),
+                              INT.3 = (KO.P2-WT.P2) - (KO.2-WT.2), 
+                              levels=designMat)
+
+print(cont.matrix)
+```
+
+Por último, realizamos un modelo de estimación de selección de genes:
+
+```{r, linearmodelfit}
+require(limma)
+fit<-lmFit(esetFiltered, designMat)
+fit.main<-contrasts.fit(fit, cont.matrix)
+fit.main<-eBayes(fit.main)
+class(fit.main)
+```
+
+Obtenemos una lista de genes expresados diferencialmente en cada una de las siguientes tablas:
+
+
+```{r, topTabs1}
+topTab_KOvsWT.2 <- topTable (fit.main, number=nrow(fit.main), coef="KOvsWT.2", adjust="fdr") 
+head(topTab_KOvsWT.2)
+```
+
+```{r, topTabs2}
+topTab_KOvsWT.P10 <- topTable (fit.main, number=nrow(fit.main), coef="KOvsWT.P10", adjust="fdr") 
+head(topTab_KOvsWT.P10)
+```
+
+```{r, topTabs3}
+topTab_KOvsWT.P2 <- topTable (fit.main, number=nrow(fit.main), coef="KOvsWT.P2", adjust="fdr") 
+head(topTab_KOvsWT.P2)
+```
+
+```{r, topTabs4}
+topTab_INT.1 <- topTable (fit.main, number=nrow(fit.main), coef="INT.1", adjust="fdr") 
+head(topTab_INT.1)
+```
+
+```{r, topTabs5}
+topTab_INT.2 <- topTable (fit.main, number=nrow(fit.main), coef="INT.2", adjust="fdr") 
+head(topTab_INT.2)
+```
+
+```{r, topTabs6}
+topTab_INT.3 <- topTable (fit.main, number=nrow(fit.main), coef="INT.3", adjust="fdr") 
+head(topTab_INT.3)
+```
+
+### Anotación de los resultados
+
+Llevamos a cabo una identificación de los genes utilizando la base de datos `mgu74av2.db.db`.
+
+```{r GeneAnnotation, message=FALSE, warning=FALSE}
+annotatedTopTable <- function(topTab, anotPackage)
+{
+  topTab <- cbind(PROBEID=rownames(topTab), topTab)
+  myProbes <- rownames(topTab)
+  thePackage <- eval(parse(text = anotPackage))
+  geneAnots <- select(thePackage, myProbes, c("SYMBOL", "ENTREZID", "GENENAME"))
+  annotatedTopTab<- merge(x=geneAnots, y=topTab, by.x="PROBEID", by.y="PROBEID")
+return(annotatedTopTab)
+}
+```
+
+```{r annotateTopTables}
+topAnnotated_KOvsWT.2 <- annotatedTopTable(topTab_KOvsWT.2,
+anotPackage="mgu74av2.db")
+topAnnotated_KOvsWT.P10 <- annotatedTopTable(topTab_KOvsWT.P10,
+anotPackage="mgu74av2.db")
+topAnnotated_KOvsWT.P2 <- annotatedTopTable(topTab_KOvsWT.P2,
+anotPackage="mgu74av2.db")
+topAnnotated_INT.1 <- annotatedTopTable(topTab_INT.1,
+anotPackage="mgu74av2.db")
+topAnnotated_INT.2 <- annotatedTopTable(topTab_INT.2,
+anotPackage="mgu74av2.db")
+topAnnotated_INT.3 <- annotatedTopTable(topTab_INT.3,
+anotPackage="mgu74av2.db")
+write.csv(topAnnotated_KOvsWT.2, file="./results/topAnnotated_KOvsWT_2.csv")
+write.csv(topAnnotated_KOvsWT.P10, file="./results/topAnnotated_KOvsWT_P10.csv")
+write.csv(topAnnotated_KOvsWT.P10, file="./results/topAnnotated_KOvsWT_P2.csv")
+write.csv(topAnnotated_INT.1, file="./results/topAnnotated_INT.1.csv")
+write.csv(topAnnotated_INT.2, file="./results/topAnnotated_INT.2.csv")
+write.csv(topAnnotated_INT.3, file="./results/topAnnotated_INT.3.csv")
+```
+
+
+```{r annotatedTop, echo=FALSE}
+short <- head(topAnnotated_KOvsWT.2[1:5,1:4])
+knitr::kable(
+  short, booktabs = TRUE,
+  caption = 'Anotaciones aañadidas a los resultados de "topTable" para la comparación "KOvsWT.2"'
+)
+```
+
+```{r annotatedTop.2, echo=FALSE}
+short <- head(topAnnotated_KOvsWT.P10[1:5,1:4])
+knitr::kable(
+  short, booktabs = TRUE,
+  caption = 'Anotaciones aañadidas a los resultados de "topTable" para la comparación "KOvsWT.P10"'
+)
+```
+
+```{r annotatedTop.3, echo=FALSE}
+short <- head(topAnnotated_KOvsWT.2[1:5,1:4])
+knitr::kable(
+  short, booktabs = TRUE,
+  caption = 'Anotaciones aañadidas a los resultados de "topTable" para la comparación "KOvsWT.P2"'
+)
+```
+
+```{r annotatedTop.4, echo=FALSE}
+short <- head(topAnnotated_INT.1[1:5,1:4])
+knitr::kable(
+  short, booktabs = TRUE,
+  caption = 'Anotaciones aañadidas a los resultados de "topTable" para la comparación "INT.1"'
+)
+```
+
+```{r annotatedTop.5, echo=FALSE}
+short <- head(topAnnotated_INT.2[1:5,1:4])
+knitr::kable(
+  short, booktabs = TRUE,
+  caption = 'Anotaciones aañadidas a los resultados de "topTable" para la comparación "INT.2"'
+)
+```
+
+```{r annotatedTop.6, echo=FALSE}
+short <- head(topAnnotated_INT.3[1:5,1:4])
+knitr::kable(
+  short, booktabs = TRUE,
+  caption = 'Anotaciones aañadidas a los resultados de "topTable" para la comparación "INT.3"'
+)
+```
+
+### Visualición de perfiles de expresión
+
+Llevamos a cabo una visualización de genes diferencialmente expresados. Para ello, tilizamos un gráfico de tipo "volcano plot".
+
+```{r volcanoPlot}
+require(mgu74av2.db)
+geneSymbols <- select(mgu74av2.db, rownames(fit.main), c("SYMBOL"))
+SYMBOLS<- geneSymbols$SYMBOL
+volcanoplot(fit.main, coef=1, highlight=4, names=SYMBOLS, 
+            main=paste("Genes diferencialmente expresados", colnames(cont.matrix)[1], sep="\n"))
+  abline(v=c(-1,1))
+
+```
+
+```{r saveVolcanos, echo=FALSE, results='hide'}
+tiff("figuras/VolcanoPlot.tiff", res = 150, width = 5, height = 5, units = 'in')
+volcanoplot(fit.main, coef=1, highlight=4, names=SYMBOLS, 
+            main=paste("Differentially expressed genes", colnames(cont.matrix)[1], sep="\n")) 
+abline(v=c(-1,1))
+
+dev.off()
+
+pdf("figuras/Volcanos.pdf")
+for (i in colnames(cont.matrix)){
+  volcanoplot(fit.main, coef=i, highlight=4, names=SYMBOLS,
+              main=paste("Genes expresados diferencialmente",i, sep="\n"))
+  abline(v=c(-1,1))
+}
+dev.off()
+```
+
+### Comparación entre distintas comparaciones
+
+Utilizamos un diagrama de Venn para realizar una comparación entre distintas comparaciones.
+
+```{r decideTests.1}
+require(limma)
+res<-decideTests(fit.main, method="separate", adjust.method="fdr", p.value=0.1, lfc=1)
+```
+
+
+```{r resumeDecideTests}
+sum.res.rows<-apply(abs(res),1,sum)
+res.selected<-res[sum.res.rows!=0,] 
+print(summary(res))
+```
+
+Con el diagrama de Venn podemos ver que las situaciones 2 y P10 comparten más genes en común, aunque son más numerosos los genes que son únicos para cada una de las dos situaciones.
+
+```{r, vennDiagram}
+vennDiagram (res.selected[,1:3], cex=0.9)
+title("Genes en común entre las tres comparaciones\n Genes seleccionados con FDR < 0.1 y logFC > 1")
+```
+
+```{r vennPlot, echo=FALSE, results='hide'}
+tiff("figuras/VennPlot.tiff", res = 150, width = 5.5, height = 5.5, units = 'in')
+vennDiagram (res.selected[,1:3], cex=0.9)
+title("Genes en común entre las tres comparaciones\n Genes seleccionados con FDR < 0.1 y logFC > 1")
+dev.off()
+```
+
+Además, creamos un "Heatmap" o mapa de colores para ver una agrupación jerárquica de los genes.
+
+```{r data4Heatmap}
+probesInHeatmap <- rownames(res.selected)
+HMdata <- exprs(esetFiltered)[rownames(exprs(esetFiltered)) %in% probesInHeatmap,]
+
+geneSymbols <- select(mgu74av2.db, rownames(HMdata), c("SYMBOL"))
+SYMBOLS<- geneSymbols$SYMBOL
+rownames(HMdata) <- SYMBOLS
+write.csv(HMdata, file = file.path("./results/data4Heatmap.csv"))
+```
+
+
+```{r heatmapNoclustering}
+my_palette <- colorRampPalette(c("blue", "red"))(n = 299)
+require(gplots)
+
+heatmap.2(HMdata,
+          Rowv = FALSE,
+          Colv = FALSE,
+          main = "Genes diferencialmente expresados \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+          tracecol = NULL,
+          dendrogram = "none",
+          srtCol = 30)
+```
+
+
+```{r heatmapClustering}
+heatmap.2(HMdata,
+          Rowv = TRUE,
+          Colv = TRUE,
+          dendrogram = "both",
+          main = "Genes diferencialmente expresados \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+          tracecol = NULL,
+          srtCol = 30)
+```
+
+```{r, echo=FALSE,  results='hide'}
+tiff("figuras/Heatmap1.tiff", res = 150, width = 5.5, height = 5.5, units = 'in')
+heatmap.2(HMdata,
+          Rowv = TRUE,
+          Colv = TRUE,
+          main = "Genes diferencialmente expresados \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+          tracecol = NULL,
+          dendrogram = "both",
+          srtCol = 30)
+dev.off()
+
+tiff("figuras/Heatmap2.tiff", res = 150, width = 5.5, height = 5.5, units = 'in')
+heatmap.2(HMdata,
+          Rowv = FALSE,
+          Colv = FALSE,
+          dendrogram = "none",
+          main = "Genes diferencialmente expresados \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("purple", 4), rep("blue", 4), rep("green", 4), rep("red", 4), rep("orange", 4), rep("yellow", 4)),
+          tracecol = NULL,
+          srtCol = 30)
+dev.off()
+```
+
+Si observamos el gráfico "Heatmap"" podemos ver que existen tres agrupaciones: los genes de las condiciones KO y WT de P2, los genes de la condición KO de 2 y P10 y los genes de las condiciones WT de 2 y P10.
+
+### Análisis de significación biológica
+
+Llevamos a cambo un análisis de la significación biológica mediante análisis de enriquecimiento (“Gene Enrichment Analysis”). Este tipo de análisis se realiza sobre la base de datos de anotaciones "Gene Ontology". Para que resulte fiable, en este análisis solo se incluyen genes con p-valores ajustados inferiores a 0.05.
+
+```{r }
+require(GOstats)
+require(mgu74av2.db)
+require(annotate)
+
+
+listOfTables <- list(KOvsWT2 = topTab_KOvsWT.2, KOvsWTP2 = topTab_KOvsWT.P2, KOvsWTP10 = topTab_KOvsWT.P10, INT1 = topTab_INT.1, INT2 = topTab_INT.2, INT3 = topTab_INT.3)
+for (i in 1:length(listOfTables)){
+  topTab <- listOfTables[[i]]
+  entrezUniverse = unique(getEG(rownames(topTab), "mgu74av2.db"))
+  whichGenes<-topTab["adj.P.Val"]<0.05
+  geneIds <- unique(getEG(rownames(topTab)[whichGenes],"mgu74av2.db"))
+  GOparams = new("GOHyperGParams", geneIds=geneIds,
+                 universeGeneIds=entrezUniverse,
+                 annotation="mgu74av2.db", ontology="BP",
+                 pvalueCutoff=0.001, conditional=FALSE,
+                 testDirection="over")
+  KEGGparams = new("KEGGHyperGParams", geneIds=geneIds,
+                   universeGeneIds=entrezUniverse, annotation="mgu74av2.db",
+                   pvalueCutoff=0.01, testDirection="over")
+  # Analisis
+  GOhyper = hyperGTest(GOparams)
+  KEGGhyper = hyperGTest(KEGGparams)
+  # Informe html con los resultados 
+  comparison = names(listOfTables)[i]
+  GOfilename =file.path("./results/", paste("GOResults.",comparison,".html", 
+                                            sep=""))
+  KEGGfilename =file.path("./results/", paste("KEGGResults.", 
+                                              comparison,".html", sep=""))
+  htmlReport(GOhyper, file = GOfilename, summary.args=list("htmlLinks"=TRUE))
+  htmlReport(KEGGhyper, file = KEGGfilename, 
+             summary.args=list("htmlLinks"=TRUE))
+
+}
+
+summary(GOhyper)
+summary(KEGGhyper)
+```
+
+
+# Resumen de resultados y discusión
+
+Como se ha podido ver desde PCA hasta el Heatmap, la condición KO para 2 y P10 y la condicion WT para 2 y P10 presentan más similitud en la expresión de algunos genes que con las condiciones de P2 o entre las condiciones KO y WT de ratones del mismo grupo de edad. También en el Heatmap se ha visto que la expresión de algunos genes de P2 es más similar para WT y KO que comparando las condiciones de los otros dos grupos de ratones de distinto grupo de edad.
+
+# Problemas y reflexiones durante la realización de la PEC
+Es conveniente resaltar que, aunque Bioconductor es una herramienta muy potente y que se implementa muy bien en R, es necesario tener un conocimiento del código a ejecutar, así como unos datos bastante robustos. Precisamente el tema de los datos ha hecho que haya tenido que cambiar de estudio hasta en tres ocasiones. Por otro lado, R Marckdown permite realizar informes con distintos estilos, pero hay pequeños detalles que no he sido capaz de poner, por ejemplo, el tema de los pies de cada imagen o gráfica, ya que no me salían correctamente.
+
+Como reflexión final, me ha parecido una PEC interesante que engloba muy bien todo lo que hemos ido estudiando a lo largo del máster. Aunque el resultado seguramente sea mejorable, creo que es un buen comienzo para empezar a entender las aplicaciones y la importancia de la Bioinformática como disciplina.
+
+# Referencias
+
+Shigeo Yoshida, Alan J. Mears, James S. Friedman, Todd Carter, Shirley He, Edwin Oh, Yuezhou Jing, Rafal Farjo, Gilles Fleury, Carrolee Barlow, Alfred O. Hero, Anand Swaroop, Expression profiling of the developing and mature Nrl −/− mouse retina: identification of retinal disease candidates and transcriptional regulatory targets of Nrl , Human Molecular Genetics, Volume 13, Issue 14, 15 July 2004, Pages 1487–1503, https://doi.org/10.1093/hmg/ddh160
+
+GEO: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE8972
+
+GitHub: https://github.com/cferna0256/Bioinformatics/tree/master/PEC_1_CarlosFdez
